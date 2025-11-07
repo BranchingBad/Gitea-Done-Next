@@ -34,26 +34,27 @@ Before starting, all configuration is managed in a `.env` file to keep secrets a
     *   `GITEA_HOST`: The domain for Gitea (e.g., `gitea.localhost` or `gitea.your.domain`).
     *   `DRONE_HOST`: The domain for Drone (e.g., `drone.localhost` or `drone.your.domain`).
     *   `NEXUS_HOST`: The domain for Nexus (e.g., `nexus.localhost` or `nexus.your.domain`).
+    *   `NEXUS_REGISTRY_HOST`: The dedicated domain for the Nexus Docker registry (e.g., `nexus-registry.your.domain`).
     *   `DRONE_RPC_SECRET`: A strong, unique secret. You can generate one with `openssl rand -hex 16`.
     *   `LETSENCRYPT_EMAIL`: Your email address, for SSL certificate notifications.
     *   The `DRONE_GITEA_CLIENT_ID` and `DRONE_GITEA_CLIENT_SECRET` variables will be filled in during the Gitea setup step below.
+
+    *   **(Optional) Image Versions**: You can override the default image versions if needed.
+        *   `GITEA_VERSION`
+        *   `NEXUS_VERSION`
+        *   `DRONE_VERSION`
+        *   `DRONE_RUNNER_VERSION`
+        *   `TRAEFIK_VERSION`
 
 > **Note:** The `docker-compose.yml` file is pre-configured to read all variables from the `.env` file. You should not need to edit the `docker-compose.yml` file directly.
 
 ## 3. 🐙 Gitea Setup (Source Control)
 First, we'll start all services. Traefik will begin provisioning SSL certificates.
-
 1.  **Start all services:**
     ```bash
     docker-compose up -d
     ```
-2.  **Access Gitea UI:** Open `http://localhost:3000` in your browser.
-3.  **Complete Initial Setup:**
-    *   **Database Type**: Select **SQLite3** for simplicity.
-    *   **Base URL**: Ensure it is `http://localhost:3000/`. This URL is used for user-facing links and OAuth2 redirects and must be accessible from your browser.
-4.  **Create Admin User:** Register a new user. Use the same username you set for `YOUR_GITEA_USERNAME` in the `docker-compose.yml` file.
-5.  **Create Admin User:** Register a new user. This will be your admin account. **Important:** Use the exact same username you set for `GITEA_ADMIN_USER` in your `.env` file. This ensures the user is automatically granted admin privileges in Drone.
-2.  **Access Gitea UI:** Open `https://<your_gitea_host>` (e.g., `https://gitea.your.domain`).
+2.  **Access Gitea UI:** Open `https://<your_gitea_host>` (e.g., `https://gitea.your.domain`). It may take a moment for Traefik to provision the SSL certificate.
 3.  **Complete Initial Setup:** Follow the on-screen instructions. The **Base URL** should be pre-filled with your correct HTTPS domain.
 4.  **Create Admin User:** Register a new user. This will be your admin account. **Important:** Use the exact same username you set for `GITEA_ADMIN_USER` in your `.env` file. This ensures the user is automatically granted admin privileges in Drone.
 5.  **Create OAuth2 Application for Drone:**
@@ -94,7 +95,7 @@ Next, we'll configure Nexus to host our private Docker images.
     *   **Roles**: Move `ci-docker-role` from the *Available* box to the *Granted* box.
     *   Click **Create local user**.
 
-Your private Docker registry is now available at `<your_nexus_host>/repository/docker-private/`.
+Your private Docker registry is now available at `<your_nexus_registry_host>`.
 > **Security Note:** Using a dedicated user with scoped permissions is significantly more secure than using the `admin` account in your pipeline.
 
 ## 5. 🚁 Drone Setup (CI Automation)
@@ -107,7 +108,7 @@ Finally, let's connect Drone to Gitea and configure the repository pipeline.
     *   Go to the **Secrets** section and add the following secrets. These will be used by the pipeline to log in to Nexus.
         *   `NEXUS_USER`: `ci-user` (the dedicated user you just created).
         *   `NEXUS_PASS`: The password you set for the `ci-user`.
-        *   `NEXUS_HOST`: The domain for Nexus (e.g., `nexus.your.domain`).
+        *   `NEXUS_REGISTRY_HOST`: The dedicated domain for your Nexus registry (e.g., `nexus-registry.your.domain`).
 
 ## 6. 🚀 The Pipeline: `.drone.yml`
 Add a `.drone.yml` file to the root of your Git repository. This file defines the CI/CD pipeline steps.
@@ -138,7 +139,7 @@ steps:
 
   - name: build_and_push
     image: plugins/docker
-    depends_on: [ test ] # Only run if the 'test' step succeeds
+    # This step runs automatically after 'test' succeeds
     settings:
       # Credentials for Nexus (from Drone secrets)
       username:
@@ -147,12 +148,14 @@ steps:
         from_secret: NEXUS_PASS
       
       # Build & Push Details
-      repo: ${NEXUS_HOST}/repository/docker-private/my-app
+      repo: ${NEXUS_REGISTRY_HOST}/my-app
       tags:
         - ${DRONE_COMMIT_SHA:0:7} # Tag with the short commit hash
         - latest
       dockerfile: Dockerfile # Assumes a 'Dockerfile' is in your repo
       context: .
+      # Enable Docker layer caching to speed up subsequent builds
+      cache_from: [ "${NEXUS_REGISTRY_HOST}/my-app:latest" ]
 
 ```
 

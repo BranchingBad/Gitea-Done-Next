@@ -40,7 +40,7 @@ services:
 
   # 2. Nexus (Artifact Repository)
   nexus:
-    image: sonatype/nexus3:3.69.0 # Pinned version for stability
+    image: sonatype/nexus3:${NEXUS_VERSION:-3.69.0} # Pinned version for stability
     container_name: nexus
     user: "nexus" # <-- IMPROVEMENT: Run as non-root nexus user
     volumes:
@@ -104,7 +104,7 @@ services:
 
   # 4. Drone Runner (The "Worker")
   drone-runner:
-    image: drone/drone-runner-docker:1.8.4 # Pinned version for stability
+    image: drone/drone-runner-docker:${DRONE_RUNNER_VERSION:-1.8.4} # Pinned version for stability
     container_name: drone-runner
     volumes:
       - ${DOCKER_HOST:-/var/run/docker.sock}:/var/run/docker.sock # Mount container runtime socket
@@ -117,14 +117,14 @@ services:
       - DRONE_RUNNER_CAPACITY=2
       - DRONE_RUNNER_NAME=docker-runner
       # IMPROVEMENT: Allow runner to communicate with services over the internal network.
-      - DRONE_RUNNER_NETWORKS=gitea-done-next_gitea-done-next
+      - DRONE_RUNNER_NETWORKS=${COMPOSE_PROJECT_NAME:-gitea-done-next}_gitea-done-next
     restart: unless-stopped
     depends_on:
       - drone-server
 
   # 5. Traefik (Reverse Proxy)
   traefik:
-    image: traefik:v2.11
+    image: traefik:${TRAEFIK_VERSION:-v2.11}
     container_name: traefik
     ports:
       - "80:80"    # HTTP entrypoint

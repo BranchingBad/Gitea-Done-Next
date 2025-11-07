@@ -14,14 +14,12 @@ steps:
 
   - name: test
     image: golang:1.22
-    depends_on: [ lint ]
     commands:
       - echo "Running unit tests..."
       # - go test -v ./...
 
   - name: build_and_push
     image: plugins/docker # Use the official Docker plugin for Drone
-    depends_on: [ test ]
     settings:
       # Credentials for Nexus (from Drone secrets)
       username:
@@ -31,12 +29,14 @@ steps:
 
       # Build & Push Details
       # IMPROVEMENT: Use the secure, public-facing Nexus host.
-      # The NEXUS_HOST variable must be defined as a secret in Drone.
-      repo: ${NEXUS_HOST}/repository/docker-private/my-app
+      # The NEXUS_REGISTRY_HOST variable must be defined as a secret in Drone.
+      repo: ${NEXUS_REGISTRY_HOST}/my-app
       tags:
         - ${DRONE_COMMIT_SHA:0:7} # Tag with the short commit hash
         - latest
       dockerfile: Dockerfile
       context: .
-      cache_from:
-        - ${NEXUS_HOST}/repository/docker-private/my-app:latest
+      # IMPROVEMENT: Enable Docker layer caching to speed up builds.
+      # This reuses layers from the 'latest' tag of the image.
+      cache_from: [ "${NEXUS_REGISTRY_HOST}/my-app:latest" ]
+      insecure: false # Ensure we are connecting securely
