@@ -1,11 +1,12 @@
 ## 1. Project Setup: `docker-compose.yml`
 This file is the foundation of the project, defining the Gitea, Nexus, and Drone services required for a complete CI/CD pipeline.
 
-Create a project folder and place the following `docker-compose.yml` file inside it.
+First, create a project folder and add the following two files.
 
-```yaml
+#### `docker-compose.yml`
+```dockercompose
 version: '3.8'
-
+ 
 networks:
   devops-net:
     driver: bridge
@@ -13,11 +14,12 @@ networks:
 volumes:
   gitea-data:
   nexus-data:
-
+  drone-data:
+ 
 services:
   # 1. Gitea (Git Server)
   gitea:
-    image: gitea/gitea:latest
+    image: gitea/gitea:1.21.11 # Pinned version for stability
     container_name: gitea
     volumes:
       - gitea-data:/data
@@ -32,54 +34,58 @@ services:
 
   # 2. Nexus (Artifact Repository)
   nexus:
-    image: sonatype/nexus3:latest
+    image: sonatype/nexus3:3.68.1 # Pinned version for stability
     container_name: nexus
+    user: "nexus" # <-- IMPROVEMENT: Run as non-root nexus user
     volumes:
       - nexus-data:/nexus-data
     ports:
       - "8081:8081"  # Web UI
       - "8082:8082"  # Docker Registry Port
+    environment:
+      # <-- IMPROVEMENT: Allocate 1GB RAM to Nexus. Adjust as needed.
+      - EXTRA_JAVA_OPTS=-Xms1g -Xmx1g
     networks:
       - devops-net
     restart: unless-stopped
 
   # 3. Drone (CI Server)
   drone-server:
-    image: drone/drone:2
+    image: drone/drone:2.22.0 # Pinned version for stability
     container_name: drone-server
     ports:
       - "80:80"
     volumes:
-      - /var/lib/drone:/data
+      - drone-data:/data
     networks:
       - devops-net
     environment:
       # --- Gitea Connection ---
       - DRONE_GITEA_SERVER=http://gitea:3000
-      - DRONE_GITEA_CLIENT_ID= # <-- SET THIS IN STEP 2
-      - DRONE_GITEA_CLIENT_SECRET= # <-- SET THIS IN STEP 2
+      - DRONE_GITEA_CLIENT_ID=${DRONE_GITEA_CLIENT_ID}
+      - DRONE_GITEA_CLIENT_SECRET=${DRONE_GITEA_CLIENT_SECRET}
       
       # --- Drone Config ---
-      - DRONE_RPC_SECRET=YOUR_STRONG_SECRET_HERE # <-- SET THIS
-      - DRONE_SERVER_HOST=localhost # <-- Set to your server's domain or IP
+      - DRONE_RPC_SECRET=${DRONE_RPC_SECRET}
+      - DRONE_SERVER_HOST=${DRONE_SERVER_HOST}
       - DRONE_SERVER_PROTO=http
-      - DRONE_USER_CREATE=username:YOUR_GITEA_USERNAME,admin:true # Auto-make your user admin
+      - DRONE_USER_CREATE=username:${GITEA_USER},admin:true # Auto-make your Gitea user a Drone admin
     restart: unless-stopped
     depends_on:
       - gitea
 
   # 4. Drone Runner (The "Worker")
   drone-runner:
-    image: drone/drone-runner-docker:1
+    image: drone/drone-runner-docker:1.8.3 # Pinned version for stability
     container_name: drone-runner
     volumes:
-      - /var/run/docker.sock:/var/run/docker.sock # Mount Docker socket
+      - ${DOCKER_HOST:-/var/run/docker.sock}:/var/run/docker.sock # Mount container runtime socket
     networks:
       - devops-net
     environment:
       - DRONE_RPC_PROTO=http
       - DRONE_RPC_HOST=drone-server # Connects to the server above
-      - DRONE_RPC_SECRET=YOUR_STRONG_SECRET_HERE # <-- MUST MATCH
+      - DRONE_RPC_SECRET=${DRONE_RPC_SECRET} # <-- MUST MATCH
       - DRONE_RUNNER_CAPACITY=2
       - DRONE_RUNNER_NAME=docker-runner
     restart: unless-stopped

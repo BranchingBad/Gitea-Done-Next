@@ -28,11 +28,15 @@ services:
   nexus:
     image: sonatype/nexus3:latest
     container_name: nexus
+    user: "nexus" # <-- IMPROVEMENT: Run as non-root nexus user
     volumes:
       - nexus-data:/nexus-data
     ports:
       - "8081:8081"  # Web UI
       - "8082:8082"  # Docker Registry Port
+    environment:
+      # <-- IMPROVEMENT: Allocate 1GB RAM to Nexus. Adjust as needed.
+      - EXTRA_JAVA_OPTS=-Xms1g -Xmx1g
     networks:
       - devops-net
     restart: unless-stopped
