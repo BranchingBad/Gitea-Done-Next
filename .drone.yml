@@ -1,0 +1,25 @@
+kind: pipeline
+type: docker # Run on our Docker runner
+name: default
+
+steps:
+- name: build_and_push
+  image: plugins/docker # Use the official Docker plugin
+  settings:
+    # --- Credentials for Nexus ---
+    # These 'from_secret' values match the secrets you just created in Drone
+    username:
+      from_secret: NEXUS_USER
+    password:
+      from_secret: NEXUS_PASS
+    
+    # --- Build & Push Details ---
+    repo: nexus:8082/docker-private/my-app # Use the service name for inter-container communication
+    tags:
+      - ${DRONE_COMMIT_SHA:0:7} # Tag with the short commit hash
+      - latest
+    dockerfile: Dockerfile # Assumes a 'Dockerfile' is in your repo
+    context: .
+    insecure: true # Add this because we're using HTTP, not
+    build_args:
+      - BUILDKIT_INLINE_CACHE=1 # Enable build cache

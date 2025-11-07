@@ -1,0 +1,81 @@
+version: '3.8'
+
+networks:
+  devops-net:
+    driver: bridge
+
+volumes:
+  gitea-data:
+  nexus-data:
+
+services:
+  # 1. Gitea (Git Server)
+  gitea:
+    image: gitea/gitea:latest
+    container_name: gitea
+    volumes:
+      - gitea-data:/data
+      - /etc/timezone:/etc/timezone:ro
+      - /etc/localtime:/etc/localtime:ro
+    ports:
+      - "3000:3000"  # Web UI
+      - "2222:22"    # SSH
+    networks:
+      - devops-net
+    restart: unless-stopped
+
+  # 2. Nexus (Artifact Repository)
+  nexus:
+    image: sonatype/nexus3:latest
+    container_name: nexus
+    volumes:
+      - nexus-data:/nexus-data
+    ports:
+      - "8081:8081"  # Web UI
+      - "8082:8082"  # Docker Registry Port
+    networks:
+      - devops-net
+    restart: unless-stopped
+
+  # 3. Drone (CI Server)
+  drone-server:
+    image: drone/drone:2
+    container_name: drone-server
+    ports:
+      - "80:80"
+    volumes:
+      - /var/lib/drone:/data
+    networks:
+      - devops-net
+    environment:
+      # --- Gitea Connection ---
+      - DRONE_GITEA_SERVER=http://gitea:3000
+      - DRONE_GITEA_CLIENT_ID=${DRONE_GITEA_CLIENT_ID}
+      - DRONE_GITEA_CLIENT_SECRET=${DRONE_GITEA_CLIENT_SECRET}
+      
+      # --- Drone Config ---
+      - DRONE_RPC_SECRET=${DRONE_RPC_SECRET}
+      - DRONE_SERVER_HOST=${DRONE_SERVER_HOST}
+      - DRONE_SERVER_PROTO=http
+      - DRONE_USER_CREATE=username:${GITEA_USER},admin:true # Auto-make your user admin
+    restart: unless-stopped
+    depends_on:
+      - gitea
+
+  # 4. Drone Runner (The "Worker")
+  drone-runner:
+    image: drone/drone-runner-docker:1
+    container_name: drone-runner
+    volumes:
+      - ${DOCKER_HOST:-/var/run/docker.sock}:/var/run/docker.sock # Mount container runtime socket
+    networks:
+      - devops-net
+    environment:
+      - DRONE_RPC_PROTO=http
+      - DRONE_RPC_HOST=drone-server # Connects to the server above
+      - DRONE_RPC_SECRET=${DRONE_RPC_SECRET} # <-- MUST MATCH
+      - DRONE_RUNNER_CAPACITY=2
+      - DRONE_RUNNER_NAME=docker-runner
+    restart: unless-stopped
+    depends_on:
+      - drone-server
