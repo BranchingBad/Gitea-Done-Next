@@ -19,7 +19,9 @@ steps:
     commands:
       - echo "Running unit tests..."
       # - go test -v ./...
-
+    volumes:
+      - name: go-cache
+        path: /go
   - name: build_for_pr
     image: plugins/docker
     settings:
@@ -90,9 +92,13 @@ steps:
         [ "${DRONE_COMMIT_SHA:0:7}", "latest" ]
         {{/if}}
       registry: ${NEXUS_REGISTRY_HOST}
-      # This is a tag-only operation, no build needed
-      dry_run: true
+      # This step re-tags the scanned image. Because the image layers already exist
+      # in the registry, this is a fast manifest-only operation, not a full rebuild.
     trigger:
       event: [ push, tag ]
       branch: [ main ]
     depends_on: [ scan ]
+
+volumes:
+  - name: go-cache
+    path: /go

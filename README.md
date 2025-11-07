@@ -125,49 +125,90 @@ Add a `.drone.yml` file to the root of your Git repository. This file defines th
 
 Here is a sample pipeline that builds a Docker image from a `Dockerfile` and pushes it to your private Nexus registry.
 
+> **Note:** The pipeline below is a comprehensive example that demonstrates a "build-scan-promote" workflow. It validates pull requests, scans for vulnerabilities, and creates versioned releases based on Git tags.
+
 ```yaml
 kind: pipeline
 type: docker # Specifies the runner type
 name: default
-
 trigger:
-  branch:
-    - main # Or `master`, depending on your repository's default branch
-
+  event:
+    - push
+    - tag
+    - pull_request
+ 
 steps:
   - name: lint
     image: golangci/golangci-lint:v1.59
     commands:
       - echo "Running linter..."
       # - golangci-lint run
-
   - name: test
     image: golang:1.22
     commands:
       - echo "Running unit tests..."
       # - go test -v ./...
-
-  - name: build_and_push
+  - name: build_for_pr
     image: plugins/docker
-    # This step runs automatically after 'test' succeeds
     settings:
-      # Credentials for Nexus (from Drone secrets)
+      repo: ${DRONE_REPO_OWNER}/${DRONE_REPO_NAME}
+      tags: [ "pr-${DRONE_PULL_REQUEST}" ]
+      dry_run: true # Build but do not push
+      registry: ${NEXUS_REGISTRY_HOST}
       username:
         from_secret: NEXUS_USER
       password:
         from_secret: NEXUS_PASS
-      
-      # Build & Push Details
+    trigger:
+      event: [ pull_request ]
+  - name: build
+    image: plugins/docker
+    settings:
+      username:
+        from_secret: NEXUS_USER
+      password:
+        from_secret: NEXUS_PASS
       repo: ${DRONE_REPO_OWNER}/${DRONE_REPO_NAME}
-      tags:
-        - ${DRONE_COMMIT_SHA:0:7} # Tag with the short commit hash
-        - latest
-      dockerfile: Dockerfile # Assumes a 'Dockerfile' is in your repo
-      context: .
-      # Enable Docker layer caching to speed up subsequent builds
+      tags: [ "${DRONE_COMMIT_SHA:0:7}" ] # Push a temporary tag for scanning
       cache_from: [ "${NEXUS_REGISTRY_HOST}/${DRONE_REPO_OWNER}/${DRONE_REPO_NAME}:latest" ]
       registry: ${NEXUS_REGISTRY_HOST}
-
+    trigger:
+      event: [ push, tag ]
+      branch: [ main ]
+    depends_on: [ test ]
+  - name: scan
+    image: aquasec/trivy:0.52
+    settings:
+      input: "${NEXUS_REGISTRY_HOST}/${DRONE_REPO_OWNER}/${DRONE_REPO_NAME}:${DRONE_COMMIT_SHA:0:7}"
+      severity: "HIGH,CRITICAL" # Fail on high or critical vulnerabilities
+      exit_code: 1
+      registry_username:
+        from_secret: NEXUS_USER
+      registry_password:
+        from_secret: NEXUS_PASS
+    trigger:
+      event: [ push, tag ]
+      branch: [ main ]
+    depends_on: [ build ]
+  - name: promote
+    image: plugins/docker
+    settings:
+      username:
+        from_secret: NEXUS_USER
+      password:
+        from_secret: NEXUS_PASS
+      repo: ${DRONE_REPO_OWNER}/${DRONE_REPO_NAME}
+      tags: > # Create final tags (e.g., 'latest' or git tag 'v1.0.0')
+        {{#if build.tag}}
+        [ "${DRONE_COMMIT_SHA:0:7}", "{{build.tag}}" ]
+        {{else}}
+        [ "${DRONE_COMMIT_SHA:0:7}", "latest" ]
+        {{/if}}
+      registry: ${NEXUS_REGISTRY_HOST}
+    trigger:
+      event: [ push, tag ]
+      branch: [ main ]
+    depends_on: [ scan ]
 ```
 
 ### Testing the Pipeline
