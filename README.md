@@ -1,96 +1,40 @@
-## 1. Project Setup: `docker-compose.yml`
-This file is the foundation of the project, defining the Gitea, Nexus, and Drone services required for a complete CI/CD pipeline.
+# Gitea-Done-Next 🚀
 
-First, create a project folder and add the following two files.
+This project provides a complete, self-hosted CI/CD (Continuous Integration/Continuous Deployment) pipeline using Docker Compose. It integrates Gitea, Drone, and Nexus to create a powerful, Git-based workflow for building, testing, and storing software artifacts.
 
-#### `docker-compose.yml`
-```dockercompose
-version: '3.8'
- 
-networks:
-  devops-net:
-    driver: bridge
+It is designed for developers, small teams, and homelab enthusiasts who want a private, all-in-one solution for source control management and automated builds.
 
-volumes:
-  gitea-data:
-  nexus-data:
-  drone-data:
- 
-services:
-  # 1. Gitea (Git Server)
-  gitea:
-    image: gitea/gitea:1.21.11 # Pinned version for stability
-    container_name: gitea
-    volumes:
-      - gitea-data:/data
-      - /etc/timezone:/etc/timezone:ro
-      - /etc/localtime:/etc/localtime:ro
-    ports:
-      - "3000:3000"  # Web UI
-      - "2222:22"    # SSH
-    networks:
-      - devops-net
-    restart: unless-stopped
+### 🧩 Core Components
 
-  # 2. Nexus (Artifact Repository)
-  nexus:
-    image: sonatype/nexus3:3.68.1 # Pinned version for stability
-    container_name: nexus
-    user: "nexus" # <-- IMPROVEMENT: Run as non-root nexus user
-    volumes:
-      - nexus-data:/nexus-data
-    ports:
-      - "8081:8081"  # Web UI
-      - "8082:8082"  # Docker Registry Port
-    environment:
-      # <-- IMPROVEMENT: Allocate 1GB RAM to Nexus. Adjust as needed.
-      - EXTRA_JAVA_OPTS=-Xms1g -Xmx1g
-    networks:
-      - devops-net
-    restart: unless-stopped
+*   **🐙 Gitea**: A lightweight, self-hosted Git service. It serves as the source control management system where your code lives.
+*   **🚁 Drone CI**: A modern, container-native CI/CD platform. Drone automatically runs your build and test pipelines when you push code to Gitea.
+*   **📦 Sonatype Nexus**: A universal artifact repository. It is used to store the Docker images and other artifacts produced by your CI pipeline.
 
-  # 3. Drone (CI Server)
-  drone-server:
-    image: drone/drone:2.22.0 # Pinned version for stability
-    container_name: drone-server
-    ports:
-      - "80:80"
-    volumes:
-      - drone-data:/data
-    networks:
-      - devops-net
-    environment:
-      # --- Gitea Connection ---
-      - DRONE_GITEA_SERVER=http://gitea:3000
-      - DRONE_GITEA_CLIENT_ID=${DRONE_GITEA_CLIENT_ID}
-      - DRONE_GITEA_CLIENT_SECRET=${DRONE_GITEA_CLIENT_SECRET}
-      
-      # --- Drone Config ---
-      - DRONE_RPC_SECRET=${DRONE_RPC_SECRET}
-      - DRONE_SERVER_HOST=${DRONE_SERVER_HOST}
-      - DRONE_SERVER_PROTO=http
-      - DRONE_USER_CREATE=username:${GITEA_USER},admin:true # Auto-make your Gitea user a Drone admin
-    restart: unless-stopped
-    depends_on:
-      - gitea
+## 1. 📋 Prerequisites
 
-  # 4. Drone Runner (The "Worker")
-  drone-runner:
-    image: drone/drone-runner-docker:1.8.3 # Pinned version for stability
-    container_name: drone-runner
-    volumes:
-      - ${DOCKER_HOST:-/var/run/docker.sock}:/var/run/docker.sock # Mount container runtime socket
-    networks:
-      - devops-net
-    environment:
-      - DRONE_RPC_PROTO=http
-      - DRONE_RPC_HOST=drone-server # Connects to the server above
-      - DRONE_RPC_SECRET=${DRONE_RPC_SECRET} # <-- MUST MATCH
-      - DRONE_RUNNER_CAPACITY=2
-      - DRONE_RUNNER_NAME=docker-runner
-    restart: unless-stopped
-    depends_on:
-      - drone-server
+Before you begin, ensure you have the following installed:
+
+*   **Docker**: The container runtime used to run the services.
+*   **Docker Compose**: The tool used to define and manage the multi-container application.
+*   **(Optional) 🔑 OpenSSL**: For generating a strong RPC secret for Drone.
+
+---
+
+## 2. ⚙️ Project Setup
+
+### Configuration (`.env` file)
+### Configuration (`.env` file)
+Before starting, all configuration is managed in a `.env` file to keep secrets and settings separate from the main configuration.
+
+1.  **Create your environment file:** Copy the example template to create your own local configuration file.
+    ```bash
+    cp .env.example .env
+    ```
+2.  **Update `.env`:** Open the new `.env` file and fill in the required values.
+    *   `GITEA_USER`: Set this to the username you will create in Gitea. This user will automatically be granted admin rights in Drone.
+    *   `DRONE_SERVER_HOST`: If running on a remote server, change `localhost` to its public IP or domain name.
+    *   `DRONE_RPC_SECRET`: Replace the placeholder with a strong, unique secret. You can generate one with `openssl rand -hex 16`.
+    *   The `DRONE_GITEA_CLIENT_ID` and `DRONE_GITEA_CLIENT_SECRET` variables will be filled in during the Gitea setup step.
 ```
 
 ### Configuration
@@ -101,7 +45,7 @@ Before running `docker-compose up`, update the `environment` variables in `docke
 *   **`DRONE_SERVER_HOST`**: If you are running this on a remote server, change `localhost` to its public IP address or domain name.
 *   **`DRONE_GITEA_CLIENT_ID` & `DRONE_GITEA_CLIENT_SECRET`**: These will be populated in the next step.
 
-## 2. Gitea Setup (Source Control)
+## 3. 🐙 Gitea Setup (Source Control)
 First, we'll start Gitea to generate OAuth2 credentials for Drone.
 
 1.  **Start the Gitea service:**
@@ -121,7 +65,7 @@ First, we'll start Gitea to generate OAuth2 credentials for Drone.
 6.  **Get Credentials:** Click **Create Application**. Copy the generated **Client ID** and **Client Secret**.
 7.  **Update Docker Compose:** Paste the Client ID and Secret into the `DRONE_GITEA_CLIENT_ID` and `DRONE_GITEA_CLIENT_SECRET` environment variables in your `docker-compose.yml`.
 
-## 3. Nexus Setup (Artifact Registry)
+## 4. 📦 Nexus Setup (Artifact Registry)
 Next, we'll configure Nexus to host our private Docker images and create a dedicated user for the pipeline.
 
 1.  **Start all services:** This will launch Nexus and restart Drone with the new Gitea secrets.
@@ -160,7 +104,7 @@ Next, we'll configure Nexus to host our private Docker images and create a dedic
 Your private Docker registry is now available at `localhost:8082`.
 > **Security Note:** Using a dedicated user with scoped permissions is significantly more secure than using the `admin` account in your pipeline.
 
-## 4. Drone Setup (CI Automation)
+## 5. 🚁 Drone Setup (CI Automation)
 Finally, let's connect Drone to Gitea and configure the repository pipeline.
 
 1.  **Access Drone UI:** Open `http://localhost` (or your `DRONE_SERVER_HOST`).
@@ -172,7 +116,7 @@ Finally, let's connect Drone to Gitea and configure the repository pipeline.
         *   `NEXUS_USER`: `ci-user` (the dedicated user you just created).
         *   `NEXUS_PASS`: The password you set for the `ci-user`.
 
-## 5. The Pipeline: `.drone.yml`
+## 6. 🚀 The Pipeline: `.drone.yml`
 Add a `.drone.yml` file to the root of your Git repository. This file defines the CI/CD pipeline steps.
 
 Here is a sample pipeline that builds a Docker image from a `Dockerfile` and pushes it to your private Nexus registry.
@@ -228,7 +172,7 @@ You have now successfully built a complete Git-to-artifact CI/CD pipeline!
 
 ---
 
-## Appendix: Running with Podman
+## Appendix: 🐧 Running with Podman
 
 This project can be run using Podman and `podman-compose` as a daemonless alternative to Docker.
 
