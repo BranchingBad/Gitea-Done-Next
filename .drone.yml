@@ -2,9 +2,11 @@ kind: pipeline
 type: docker # Specifies the runner type
 name: default
 trigger:
-  branch:
-    - main # Or `master`, depending on your repository's default branch
-
+  event:
+    - push
+    - tag
+    - pull_request
+ 
 steps:
   - name: lint
     image: golangci/golangci-lint:v1.59
@@ -18,25 +20,79 @@ steps:
       - echo "Running unit tests..."
       # - go test -v ./...
 
-  - name: build_and_push
-    image: plugins/docker # Use the official Docker plugin for Drone
+  - name: build_for_pr
+    image: plugins/docker
     settings:
-      # Credentials for Nexus (from Drone secrets)
+      # This step only builds the image to validate the Dockerfile, but does not push.
+      repo: ${DRONE_REPO_OWNER}/${DRONE_REPO_NAME}
+      tags: [ "pr-${DRONE_PULL_REQUEST}" ]
+      dry_run: true # This is the key setting to prevent pushing
+      registry: ${NEXUS_REGISTRY_HOST}
       username:
         from_secret: NEXUS_USER
       password:
         from_secret: NEXUS_PASS
+    trigger:
+      event:
+        - pull_request
 
-      # Build & Push Details
-      # IMPROVEMENT: Use the secure, public-facing Nexus host.
-      # The NEXUS_REGISTRY_HOST variable must be defined as a secret in Drone.
-      repo: ${NEXUS_REGISTRY_HOST}/my-app
-      tags:
-        - ${DRONE_COMMIT_SHA:0:7} # Tag with the short commit hash
-        - latest
+  - name: build
+    image: plugins/docker # Use the official Docker plugin for Drone
+    settings:
+      username:
+        from_secret: NEXUS_USER
+      password:
+        from_secret: NEXUS_PASS
+      repo: ${DRONE_REPO_OWNER}/${DRONE_REPO_NAME}
+      # Build and push a temporary image with the commit SHA for scanning
+      tags: [ "${DRONE_COMMIT_SHA:0:7}" ]
       dockerfile: Dockerfile
       context: .
-      # IMPROVEMENT: Enable Docker layer caching to speed up builds.
-      # This reuses layers from the 'latest' tag of the image.
-      cache_from: [ "${NEXUS_REGISTRY_HOST}/my-app:latest" ]
+      registry: ${NEXUS_REGISTRY_HOST} # The NEXUS_REGISTRY_HOST variable must be defined as a secret in Drone.
+      cache_from: [ "${NEXUS_REGISTRY_HOST}/${DRONE_REPO_OWNER}/${DRONE_REPO_NAME}:latest" ]
       insecure: false # Ensure we are connecting securely
+    trigger:
+      event: [ push, tag ]
+      branch: [ main ]
+    depends_on: [ test ]
+
+  - name: scan
+    image: aquasec/trivy:0.52
+    settings:
+      # Scan the temporary image we just pushed
+      input: "${NEXUS_REGISTRY_HOST}/${DRONE_REPO_OWNER}/${DRONE_REPO_NAME}:${DRONE_COMMIT_SHA:0:7}"
+      severity: "HIGH,CRITICAL" # Fail the build if HIGH or CRITICAL vulnerabilities are found
+      exit_code: 1
+      ignore_unfixed: true
+      # Trivy needs the Nexus credentials to pull the image for scanning
+      registry_username:
+        from_secret: NEXUS_USER
+      registry_password:
+        from_secret: NEXUS_PASS
+    trigger:
+      event: [ push, tag ]
+      branch: [ main ]
+    depends_on: [ build ]
+
+  - name: promote
+    image: plugins/docker
+    settings:
+      username:
+        from_secret: NEXUS_USER
+      password:
+        from_secret: NEXUS_PASS
+      repo: ${DRONE_REPO_OWNER}/${DRONE_REPO_NAME}
+      # Re-tag the scanned image with its final version/latest tag
+      tags: >
+        {{#if build.tag}}
+        [ "${DRONE_COMMIT_SHA:0:7}", "{{build.tag}}" ]
+        {{else}}
+        [ "${DRONE_COMMIT_SHA:0:7}", "latest" ]
+        {{/if}}
+      registry: ${NEXUS_REGISTRY_HOST}
+      # This is a tag-only operation, no build needed
+      dry_run: true
+    trigger:
+      event: [ push, tag ]
+      branch: [ main ]
+    depends_on: [ scan ]

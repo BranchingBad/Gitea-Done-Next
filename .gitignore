@@ -1,12 +1,11 @@
-# Ignore local environment file
+# Environment variables
+# Contains sensitive credentials and user-specific settings.
 .env
 
-# Ignore Nexus and Gitea data volumes
-nexus-data/
-gitea-data/
+# IDE and editor directories
+.vscode/
+.idea/
 
-# Mac system files
+# OS-specific files
 .DS_Store
-
-# Windows system files
 Thumbs.db
