@@ -29,9 +29,9 @@ steps:
       tags:
         - ${DRONE_COMMIT_SHA:0:7} # Tag with the short commit hash
         - latest
-      dockerfile: Dockerfile # Assumes a 'Dockerfile' is in your repo
-      context: .
-      insecure: true # Required for connecting to Nexus via HTTP
+      dockerfile: Dockerfile
+      # No longer needed after configuring the runner's Docker daemon
+      # insecure: true
       
       # <-- IMPROVEMENT: Use the 'latest' tag as a cache source for faster builds
       cache_from:

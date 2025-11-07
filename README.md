@@ -21,29 +21,20 @@ Before you begin, ensure you have the following installed:
 ---
 
 ## 2. ⚙️ Project Setup
-
-### Configuration (`.env` file)
 ### Configuration (`.env` file)
 Before starting, all configuration is managed in a `.env` file to keep secrets and settings separate from the main configuration.
 
 1.  **Create your environment file:** Copy the example template to create your own local configuration file.
     ```bash
-    cp .env.example .env
+    cp .env.example .env # This file is ignored by Git to protect your secrets.
     ```
 2.  **Update `.env`:** Open the new `.env` file and fill in the required values.
-    *   `GITEA_USER`: Set this to the username you will create in Gitea. This user will automatically be granted admin rights in Drone.
+    *   `GITEA_ADMIN_USER`: Set this to the username you will create in Gitea. This user will automatically be granted admin rights in Drone.
     *   `DRONE_SERVER_HOST`: If running on a remote server, change `localhost` to its public IP or domain name.
     *   `DRONE_RPC_SECRET`: Replace the placeholder with a strong, unique secret. You can generate one with `openssl rand -hex 16`.
-    *   The `DRONE_GITEA_CLIENT_ID` and `DRONE_GITEA_CLIENT_SECRET` variables will be filled in during the Gitea setup step.
-```
+    *   The `DRONE_GITEA_CLIENT_ID` and `DRONE_GITEA_CLIENT_SECRET` variables will be filled in during the Gitea setup step below.
 
-### Configuration
-Before running `docker-compose up`, update the `environment` variables in `docker-compose.yml`:
-
-*   **`DRONE_RPC_SECRET`**: Change `YOUR_STRONG_SECRET_HERE` to a unique, strong secret (e.g., generated with `openssl rand -hex 16`). This value must be identical for both `drone-server` and `drone-runner`.
-*   **`DRONE_USER_CREATE`**: Replace `YOUR_GITEA_USERNAME` with the username you intend to create in Gitea.
-*   **`DRONE_SERVER_HOST`**: If you are running this on a remote server, change `localhost` to its public IP address or domain name.
-*   **`DRONE_GITEA_CLIENT_ID` & `DRONE_GITEA_CLIENT_SECRET`**: These will be populated in the next step.
+> **Note:** The `docker-compose.yml` file is pre-configured to read all variables from the `.env` file. You should not need to edit the `docker-compose.yml` file directly.
 
 ## 3. 🐙 Gitea Setup (Source Control)
 First, we'll start Gitea to generate OAuth2 credentials for Drone.
@@ -57,15 +48,16 @@ First, we'll start Gitea to generate OAuth2 credentials for Drone.
     *   **Database Type**: Select **SQLite3** for simplicity.
     *   **Base URL**: Ensure it is `http://localhost:3000/`. This URL is used for user-facing links and OAuth2 redirects and must be accessible from your browser.
 4.  **Create Admin User:** Register a new user. Use the same username you set for `YOUR_GITEA_USERNAME` in the `docker-compose.yml` file.
-5.  **Create OAuth2 Application:**
+5.  **Create Admin User:** Register a new user. This will be your admin account. **Important:** Use the exact same username you set for `GITEA_ADMIN_USER` in your `.env` file. This ensures the user is automatically granted admin privileges in Drone.
+6.  **Create OAuth2 Application for Drone:**
     *   Log in and navigate to **Settings** > **Applications**.
     *   Under the "Manage OAuth2 Applications" section, click **Create New Application**.
     *   **Application Name**: `Drone CI`
-    *   **Redirect URI**: `http://localhost/login` (or `http://<your_domain>/login` if you changed `DRONE_SERVER_HOST`).
+    *   **Redirect URI**: `http://<your_drone_host>/login` (e.g., `http://localhost/login` or `http://ci.example.com/login` if you changed `DRONE_SERVER_HOST`).
 6.  **Get Credentials:** Click **Create Application**. Copy the generated **Client ID** and **Client Secret**.
-7.  **Update Docker Compose:** Paste the Client ID and Secret into the `DRONE_GITEA_CLIENT_ID` and `DRONE_GITEA_CLIENT_SECRET` environment variables in your `docker-compose.yml`.
+7.  **Update `.env` file:** Paste the Client ID and Secret into the `DRONE_GITEA_CLIENT_ID` and `DRONE_GITEA_CLIENT_SECRET` variables in your `.env` file.
 
-## 4. 📦 Nexus Setup (Artifact Registry)
+## 4. 📦 Nexus and Drone Setup
 Next, we'll configure Nexus to host our private Docker images and create a dedicated user for the pipeline.
 
 1.  **Start all services:** This will launch Nexus and restart Drone with the new Gitea secrets.
@@ -128,11 +120,11 @@ name: default
 
 trigger:
   branch:
-    - main # Only run this pipeline for commits to the main branch
+    - main # Or `master`, depending on your repository's default branch
 
 steps:
   - name: test
-    image: golang:1.19 # Or node, python, etc.
+    image: golang:1.22
     commands:
       - echo "Running unit tests..."
       # - go test -v ./...
@@ -155,7 +147,9 @@ steps:
         - latest
       dockerfile: Dockerfile # Assumes a 'Dockerfile' is in your repo
       context: .
-      insecure: true # Required for connecting to Nexus via HTTP
+      # For a production setup, you should secure Nexus with HTTPS.
+      # For this local setup, the runner's Docker daemon is configured to trust this registry.
+
 ```
 
 ### Testing the Pipeline

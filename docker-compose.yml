@@ -7,11 +7,12 @@ networks:
 volumes:
   gitea-data:
   nexus-data:
+  drone-data:
 
 services:
   # 1. Gitea (Git Server)
   gitea:
-    image: gitea/gitea:latest
+    image: gitea/gitea:1.21.11 # Pinned version for stability
     container_name: gitea
     volumes:
       - gitea-data:/data
@@ -26,7 +27,7 @@ services:
 
   # 2. Nexus (Artifact Repository)
   nexus:
-    image: sonatype/nexus3:latest
+    image: sonatype/nexus3:3.68.1 # Pinned version for stability
     container_name: nexus
     user: "nexus" # <-- IMPROVEMENT: Run as non-root nexus user
     volumes:
@@ -43,12 +44,12 @@ services:
 
   # 3. Drone (CI Server)
   drone-server:
-    image: drone/drone:2
+    image: drone/drone:2.22.0 # Pinned version for stability
     container_name: drone-server
     ports:
       - "80:80"
     volumes:
-      - /var/lib/drone:/data
+      - drone-data:/data # Use a named volume for portability
     networks:
       - devops-net
     environment:
@@ -61,14 +62,14 @@ services:
       - DRONE_RPC_SECRET=${DRONE_RPC_SECRET}
       - DRONE_SERVER_HOST=${DRONE_SERVER_HOST}
       - DRONE_SERVER_PROTO=http
-      - DRONE_USER_CREATE=username:${GITEA_USER},admin:true # Auto-make your user admin
+      - DRONE_USER_CREATE=username:${GITEA_ADMIN_USER},admin:true # Auto-make your user admin
     restart: unless-stopped
     depends_on:
       - gitea
 
   # 4. Drone Runner (The "Worker")
   drone-runner:
-    image: drone/drone-runner-docker:1
+    image: drone/drone-runner-docker:1.8.3 # Pinned version for stability
     container_name: drone-runner
     volumes:
       - ${DOCKER_HOST:-/var/run/docker.sock}:/var/run/docker.sock # Mount container runtime socket
