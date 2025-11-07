@@ -9,6 +9,7 @@ It is designed for developers, small teams, and homelab enthusiasts who want a p
 *   **🐙 Gitea**: A lightweight, self-hosted Git service. It serves as the source control management system where your code lives.
 *   **🚁 Drone CI**: A modern, container-native CI/CD platform. Drone automatically runs your build and test pipelines when you push code to Gitea.
 *   **📦 Sonatype Nexus**: A universal artifact repository. It is used to store the Docker images and other artifacts produced by your CI pipeline.
+*   **🚦 Traefik**: A modern reverse proxy that provides automatic HTTPS for all services.
 
 ## 1. 📋 Prerequisites
 
@@ -16,7 +17,7 @@ Before you begin, ensure you have the following installed:
 
 *   **Docker**: The container runtime used to run the services.
 *   **Docker Compose**: The tool used to define and manage the multi-container application.
-*   **(Optional) 🔑 OpenSSL**: For generating a strong RPC secret for Drone.
+*   **A valid email address**: For Let's Encrypt SSL certificate generation.
 
 ---
 
@@ -30,18 +31,21 @@ Before starting, all configuration is managed in a `.env` file to keep secrets a
     ```
 2.  **Update `.env`:** Open the new `.env` file and fill in the required values.
     *   `GITEA_ADMIN_USER`: Set this to the username you will create in Gitea. This user will automatically be granted admin rights in Drone.
-    *   `DRONE_SERVER_HOST`: If running on a remote server, change `localhost` to its public IP or domain name.
-    *   `DRONE_RPC_SECRET`: Replace the placeholder with a strong, unique secret. You can generate one with `openssl rand -hex 16`.
+    *   `GITEA_HOST`: The domain for Gitea (e.g., `gitea.localhost` or `gitea.your.domain`).
+    *   `DRONE_HOST`: The domain for Drone (e.g., `drone.localhost` or `drone.your.domain`).
+    *   `NEXUS_HOST`: The domain for Nexus (e.g., `nexus.localhost` or `nexus.your.domain`).
+    *   `DRONE_RPC_SECRET`: A strong, unique secret. You can generate one with `openssl rand -hex 16`.
+    *   `LETSENCRYPT_EMAIL`: Your email address, for SSL certificate notifications.
     *   The `DRONE_GITEA_CLIENT_ID` and `DRONE_GITEA_CLIENT_SECRET` variables will be filled in during the Gitea setup step below.
 
 > **Note:** The `docker-compose.yml` file is pre-configured to read all variables from the `.env` file. You should not need to edit the `docker-compose.yml` file directly.
 
 ## 3. 🐙 Gitea Setup (Source Control)
-First, we'll start Gitea to generate OAuth2 credentials for Drone.
+First, we'll start all services. Traefik will begin provisioning SSL certificates.
 
-1.  **Start the Gitea service:**
+1.  **Start all services:**
     ```bash
-    docker-compose up -d gitea
+    docker-compose up -d
     ```
 2.  **Access Gitea UI:** Open `http://localhost:3000` in your browser.
 3.  **Complete Initial Setup:**
@@ -49,23 +53,20 @@ First, we'll start Gitea to generate OAuth2 credentials for Drone.
     *   **Base URL**: Ensure it is `http://localhost:3000/`. This URL is used for user-facing links and OAuth2 redirects and must be accessible from your browser.
 4.  **Create Admin User:** Register a new user. Use the same username you set for `YOUR_GITEA_USERNAME` in the `docker-compose.yml` file.
 5.  **Create Admin User:** Register a new user. This will be your admin account. **Important:** Use the exact same username you set for `GITEA_ADMIN_USER` in your `.env` file. This ensures the user is automatically granted admin privileges in Drone.
-6.  **Create OAuth2 Application for Drone:**
+2.  **Access Gitea UI:** Open `https://<your_gitea_host>` (e.g., `https://gitea.your.domain`).
+3.  **Complete Initial Setup:** Follow the on-screen instructions. The **Base URL** should be pre-filled with your correct HTTPS domain.
+4.  **Create Admin User:** Register a new user. This will be your admin account. **Important:** Use the exact same username you set for `GITEA_ADMIN_USER` in your `.env` file. This ensures the user is automatically granted admin privileges in Drone.
+5.  **Create OAuth2 Application for Drone:**
     *   Log in and navigate to **Settings** > **Applications**.
     *   Under the "Manage OAuth2 Applications" section, click **Create New Application**.
     *   **Application Name**: `Drone CI`
-    *   **Redirect URI**: `http://<your_drone_host>/login` (e.g., `http://localhost/login` or `http://ci.example.com/login` if you changed `DRONE_SERVER_HOST`).
-6.  **Get Credentials:** Click **Create Application**. Copy the generated **Client ID** and **Client Secret**.
-7.  **Update `.env` file:** Paste the Client ID and Secret into the `DRONE_GITEA_CLIENT_ID` and `DRONE_GITEA_CLIENT_SECRET` variables in your `.env` file.
-
-## 4. 📦 Nexus and Drone Setup
-Next, we'll configure Nexus to host our private Docker images and create a dedicated user for the pipeline.
-
-1.  **Start all services:** This will launch Nexus and restart Drone with the new Gitea secrets.
-    ```bash
-    docker-compose up -d
-    ```
-2.  **Access Nexus UI:** Open `http://localhost:8081`. It may take a few minutes for Nexus to start up completely.
-3.  **Retrieve Admin Password:** Run the following command to get the initial admin password:
+    *   **Redirect URI**: `https://<your_drone_host>/login` (e.g., `https://drone.your.domain/login`).
+6.  **Get Credentials & Update `.env`:** Click **Create Application**. Copy the generated **Client ID** and **Client Secret** and paste them into the `DRONE_GITEA_CLIENT_ID` and `DRONE_GITEA_CLIENT_SECRET` variables in your `.env` file.
+7.  **Restart Drone:** Apply the new credentials by restarting the stack: `docker-compose up -d`.
+## 4. 📦 Nexus Setup
+Next, we'll configure Nexus to host our private Docker images.
+1.  **Access Nexus UI:** Open `https://<your_nexus_host>`. It may take a few minutes for Nexus to start up completely.
+2.  **Retrieve Admin Password:** Run the following command to get the initial admin password:
     ```bash
     docker exec nexus cat /nexus-data/admin.password
     ```
@@ -75,7 +76,7 @@ Next, we'll configure Nexus to host our private Docker images and create a dedic
     *   Navigate to **Repositories** > **Create repository**.
     *   Select the **docker (hosted)** recipe.
     *   **Name**: `docker-private`.
-    *   **HTTP Port**: Under "Repository Connectors," check the box for HTTP and enter port `8082`. This exposes the Docker registry on the port defined in `docker-compose.yml`.
+    *   **HTTP Port**: Under "Repository Connectors," check the box for HTTP and enter port `8082`. Traefik will route traffic to this internal port.
     *   Click **Create repository**.
 6.  **Create a Dedicated CI Role:**
     *   Go to **Administration** > **Security** > **Roles** and click **Create role**.
@@ -93,13 +94,12 @@ Next, we'll configure Nexus to host our private Docker images and create a dedic
     *   **Roles**: Move `ci-docker-role` from the *Available* box to the *Granted* box.
     *   Click **Create local user**.
 
-Your private Docker registry is now available at `localhost:8082`.
+Your private Docker registry is now available at `<your_nexus_host>/repository/docker-private/`.
 > **Security Note:** Using a dedicated user with scoped permissions is significantly more secure than using the `admin` account in your pipeline.
 
 ## 5. 🚁 Drone Setup (CI Automation)
 Finally, let's connect Drone to Gitea and configure the repository pipeline.
-
-1.  **Access Drone UI:** Open `http://localhost` (or your `DRONE_SERVER_HOST`).
+1.  **Access Drone UI:** Open `https://<your_drone_host>` (e.g., `https://drone.your.domain`).
 2.  **Authorize Drone:** You will be redirected to Gitea. Click **Authorize Application** to grant Drone access to your account.
 3.  **Activate Repository:** Once redirected back to Drone, you will see a list of your Gitea repositories. Find your target project and click **Activate**. Confirm the settings and save.
 4.  **Configure Secrets:**
@@ -107,6 +107,7 @@ Finally, let's connect Drone to Gitea and configure the repository pipeline.
     *   Go to the **Secrets** section and add the following secrets. These will be used by the pipeline to log in to Nexus.
         *   `NEXUS_USER`: `ci-user` (the dedicated user you just created).
         *   `NEXUS_PASS`: The password you set for the `ci-user`.
+        *   `NEXUS_HOST`: The domain for Nexus (e.g., `nexus.your.domain`).
 
 ## 6. 🚀 The Pipeline: `.drone.yml`
 Add a `.drone.yml` file to the root of your Git repository. This file defines the CI/CD pipeline steps.
@@ -123,6 +124,12 @@ trigger:
     - main # Or `master`, depending on your repository's default branch
 
 steps:
+  - name: lint
+    image: golangci/golangci-lint:v1.59
+    commands:
+      - echo "Running linter..."
+      # - golangci-lint run
+
   - name: test
     image: golang:1.22
     commands:
@@ -130,7 +137,7 @@ steps:
       # - go test -v ./...
 
   - name: build_and_push
-    image: plugins/docker # Use the official Docker plugin for Drone
+    image: plugins/docker
     depends_on: [ test ] # Only run if the 'test' step succeeds
     settings:
       # Credentials for Nexus (from Drone secrets)
@@ -140,15 +147,12 @@ steps:
         from_secret: NEXUS_PASS
       
       # Build & Push Details
-      # Use the service name 'nexus' for inter-container communication
-      repo: nexus:8082/docker-private/my-app
+      repo: ${NEXUS_HOST}/repository/docker-private/my-app
       tags:
         - ${DRONE_COMMIT_SHA:0:7} # Tag with the short commit hash
         - latest
       dockerfile: Dockerfile # Assumes a 'Dockerfile' is in your repo
       context: .
-      # For a production setup, you should secure Nexus with HTTPS.
-      # For this local setup, the runner's Docker daemon is configured to trust this registry.
 
 ```
 

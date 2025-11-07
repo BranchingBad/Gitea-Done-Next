@@ -1,38 +1,42 @@
 kind: pipeline
 type: docker # Specifies the runner type
 name: default
-
 trigger:
   branch:
-    - main # Only run this pipeline for commits to the main branch
+    - main # Or `master`, depending on your repository's default branch
 
 steps:
+  - name: lint
+    image: golangci/golangci-lint:v1.59
+    commands:
+      - echo "Running linter..."
+      # - golangci-lint run
+
   - name: test
-    image: golang:1.19 # Or node, python, etc.
+    image: golang:1.22
+    depends_on: [ lint ]
     commands:
       - echo "Running unit tests..."
       # - go test -v ./...
 
   - name: build_and_push
     image: plugins/docker # Use the official Docker plugin for Drone
-    depends_on: [ test ] # Only run if the 'test' step succeeds
+    depends_on: [ test ]
     settings:
       # Credentials for Nexus (from Drone secrets)
       username:
         from_secret: NEXUS_USER
       password:
         from_secret: NEXUS_PASS
-      
+
       # Build & Push Details
-      # Use the service name 'nexus' for inter-container communication
-      repo: nexus:8082/docker-private/my-app
+      # IMPROVEMENT: Use the secure, public-facing Nexus host.
+      # The NEXUS_HOST variable must be defined as a secret in Drone.
+      repo: ${NEXUS_HOST}/repository/docker-private/my-app
       tags:
         - ${DRONE_COMMIT_SHA:0:7} # Tag with the short commit hash
         - latest
       dockerfile: Dockerfile
-      # No longer needed after configuring the runner's Docker daemon
-      # insecure: true
-      
-      # <-- IMPROVEMENT: Use the 'latest' tag as a cache source for faster builds
+      context: .
       cache_from:
-        - nexus:8082/docker-private/my-app:latest
+        - ${NEXUS_HOST}/repository/docker-private/my-app:latest
